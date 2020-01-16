@@ -2,6 +2,7 @@ package com.hundsun.mock.controller;
 
 import com.google.gson.Gson;
 import com.hundsun.mock.enums.MockExceptionEnum;
+import com.hundsun.mock.enums.ResponseEnum;
 import com.hundsun.mock.request.MockBaseRequestVo;
 import com.hundsun.mock.response.MockBaseResponseVo;
 import org.apache.http.HttpEntity;
@@ -23,6 +24,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.util.HashMap;
@@ -60,10 +62,10 @@ public class MockController {
      * @return
      */
     @GetMapping(value = "{group}/{name}/{version}/{method}")
-    public String getMock(@PathVariable String group, @PathVariable String name, @PathVariable String version,
-                          @PathVariable String method, HttpServletRequest request){
+    public void getMock(@PathVariable String group, @PathVariable String name, @PathVariable String version,
+                          @PathVariable String method, HttpServletRequest request, HttpServletResponse response){
 
-        return this.dealMock(group, name, version, method, request);
+        this.dealMock(group, name, version, method, request, response);
     }
 
     /**
@@ -76,10 +78,10 @@ public class MockController {
      * @return
      */
     @PostMapping(value = "{group}/{name}/{version}/{method}")
-    public String postMock(@PathVariable String group, @PathVariable String name, @PathVariable String version,
-                       @PathVariable String method, HttpServletRequest request) {
+    public void postMock(@PathVariable String group, @PathVariable String name, @PathVariable String version,
+                       @PathVariable String method, HttpServletRequest request, HttpServletResponse response) {
 
-        return this.dealMock(group, name, version, method, request);
+        this.dealMock(group, name, version, method, request, response);
     }
 
     /**
@@ -91,10 +93,16 @@ public class MockController {
      * @param request
      * @return
      */
-    private String dealMock(String group, String name, String version, String method, HttpServletRequest request){
+    private void dealMock(String group, String name, String version, String method, HttpServletRequest request, HttpServletResponse response){
 
         MockBaseRequestVo mockBaseRequestVo = new MockBaseRequestVo();
-        mockBaseRequestVo.setServiceName(this.getServiceName(group, name, version));
+        String serviceName = methodMap.get(group + "/" + name + "/" + version);
+        if (StringUtils.isEmpty(serviceName)){
+            logger.error("接口映射未匹配上");
+            this.setResponse(response, ResponseEnum.SERVICE_NAME_MAPPING_ERROR);
+            return;
+        }
+        mockBaseRequestVo.setServiceName(serviceName);
         mockBaseRequestVo.setFuncName(method);
         mockBaseRequestVo.setParam(this.getParams(request));
         //http
@@ -105,6 +113,7 @@ public class MockController {
         String mockBaseRequestVoStr = gson.toJson(mockBaseRequestVo);
         httpPost.setEntity(new StringEntity(mockBaseRequestVoStr,
                 ContentType.create("application/json", "utf-8")));
+
         String result;
         try {
             HttpResponse httpResponse = httpClient.execute(httpPost);
@@ -112,23 +121,53 @@ public class MockController {
             result = EntityUtils.toString(httpEntity);
         } catch (IOException e) {
             logger.error("http请求调用mock失败");
-            return MockExceptionEnum.SERVER_ERROR.getDesc();
+            this.setResponse(response, ResponseEnum.HTTP_ERROR);
+            return;
         }
-
         if (result == null) {
             logger.error("mock没有响应");
-            return MockExceptionEnum.SERVER_ERROR.getDesc();
+            this.setResponse(response, ResponseEnum.MOCK_RESPONSE_ERROR);
+        }else {
+            MockBaseResponseVo mockBaseResponseVo = gson.fromJson(result, MockBaseResponseVo.class);
+            if (MockExceptionEnum.MOCK_INTERFACE_NOT_EXIST.getCode().equals(mockBaseResponseVo.getCode())) {
+                logger.error("mock接口不存在");
+                this.setResponse(response, ResponseEnum.MOCK_INTERFACE_ERROR);
+            }else if (MockExceptionEnum.MOCK_SUCCESS.getCode().equals(mockBaseResponseVo.getCode())) {
+                this.setResponse(response, ResponseEnum.SUCCESS.getCode(), mockBaseResponseVo.getRsp());
+            }else{
+                logger.error("mock调用失败");
+                this.setResponse(response, ResponseEnum.MOCK_OTHER_ERROR);
+            }
         }
-        MockBaseResponseVo mockBaseResponseVo = gson.fromJson(result, MockBaseResponseVo.class);
-        if (MockExceptionEnum.MOCK_INTERFACE_NOT_EXIST.getCode().equals(mockBaseResponseVo.getCode())) {
-            logger.error("mock接口不存在");
-            return MockExceptionEnum.MOCK_ERROR.getDesc();
+    }
+
+    /**
+     * 统一设置返回值 错误信息包装成json
+     * @param response
+     * @param responseEnum
+     */
+    private void setResponse(HttpServletResponse response, ResponseEnum responseEnum){
+
+        String errorMessage = "{ \"message\" : \"" + responseEnum.getDesc() + "\"}";
+        this.setResponse(response, responseEnum.getCode(), errorMessage);
+    }
+
+    /**
+     * 统一设置返回值
+     * @param response
+     * @param code
+     * @param message
+     */
+    private void setResponse(HttpServletResponse response, Integer code, String message){
+
+        response.setCharacterEncoding("UTF-8");
+        response.setHeader("Content-type", "application/json;charset=UTF-8");
+        response.setStatus(code);
+        try {
+            response.getWriter().write(message);
+        } catch (IOException e) {
+            e.printStackTrace();
         }
-        if (MockExceptionEnum.MOCK_SUCCESS.getCode().equals(mockBaseResponseVo.getCode())) {
-            return mockBaseResponseVo.getRsp();
-        }
-        logger.error("mock调用失败");
-        return MockExceptionEnum.SERVER_ERROR.getDesc();
     }
 
     /**
@@ -149,22 +188,5 @@ public class MockController {
             e.printStackTrace();
         }
         return sb.toString();
-    }
-
-    /**
-     * 得到映射出来的服务名
-     * @param group
-     * @param name
-     * @param version
-     * @return
-     */
-    private String getServiceName(String group, String name, String version){
-
-        String serviceName = methodMap.get(group + "/" + name + "/" + version);
-        if (StringUtils.isEmpty(serviceName)){
-            logger.error("找不到对应的服务");
-            return MockExceptionEnum.PARAM_NOT_EMPTY_ERROR.getDesc();
-        }
-        return serviceName;
     }
 }

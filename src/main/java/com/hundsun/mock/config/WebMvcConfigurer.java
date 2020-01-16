@@ -1,5 +1,6 @@
 package com.hundsun.mock.config;
 
+import com.hundsun.mock.enums.ResponseEnum;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.HandlerExceptionResolver;
 import org.springframework.web.servlet.ModelAndView;
@@ -19,7 +20,6 @@ import java.util.List;
 @Configuration
 public class WebMvcConfigurer extends WebMvcConfigurerAdapter {
 
-    private final static String  DEFAULT_RESPONSE = "{}";
     @Override
     public void configureHandlerExceptionResolvers(List<HandlerExceptionResolver> exceptionResolvers) {
         exceptionResolvers.add(new HandlerExceptionResolver() {
@@ -28,8 +28,9 @@ public class WebMvcConfigurer extends WebMvcConfigurerAdapter {
                 try {
                     httpServletResponse.setCharacterEncoding("UTF-8");
                     httpServletResponse.setHeader("Content-type", "application/json;charset=UTF-8");
-                    httpServletResponse.setStatus(200);
-                    httpServletResponse.getWriter().write(DEFAULT_RESPONSE);
+                    String errorMessage = "{ \"message\" : \"" + ResponseEnum.METHOD_NOT_FIND_ERROR.getDesc() + "\"}";
+                    httpServletResponse.setStatus(ResponseEnum.METHOD_NOT_FIND_ERROR.getCode());
+                    httpServletResponse.getWriter().write(errorMessage);
                 } catch (IOException ex) {
                     ex.printStackTrace();
                 }
